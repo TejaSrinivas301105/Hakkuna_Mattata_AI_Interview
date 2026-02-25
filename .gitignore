@@ -1,0 +1,27 @@
+# ─── Dependencies ───
+node_modules/
+venv/
+
+# ─── Build/Cache ───
+.vite/
+dist/
+__pycache__/
+*.pyc
+
+# ─── Environment ───
+.env
+
+# ─── Generated files ───
+*.mp3
+*.wav
+*.tmp
+
+# ─── IDE ───
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+.DS_Store
