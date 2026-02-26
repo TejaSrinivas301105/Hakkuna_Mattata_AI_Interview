@@ -30,6 +30,26 @@ function ProtectedRoute({ children }) {
   return isUploaded ? children : <Navigate to="/upload" replace />;
 }
 
+function ScreeningGate({ children }) {
+  const { isUploaded } = useUploadStatus();
+  if (!isUploaded) return <Navigate to="/upload" replace />;
+  return children;
+}
+
+function InterviewGate({ children }) {
+  const { isUploaded, interviewId } = useUploadStatus();
+  if (!isUploaded) return <Navigate to="/upload" replace />;
+  if (!interviewId) return <Navigate to="/voice-screen" replace />;
+  return children;
+}
+
+function ReportGate({ children }) {
+  const { isUploaded, candidateId } = useUploadStatus();
+  if (!isUploaded) return <Navigate to="/upload" replace />;
+  if (!candidateId) return <Navigate to="/upload" replace />;
+  return children;
+}
+
 function AppContent() {
   const navigate = useNavigate();
   const [isUploaded, setIsUploaded] = useState(false);
@@ -59,14 +79,14 @@ function AppContent() {
             <Route path="/signup" element={<GuestRoute><SignUp onNavigate={nav} /></GuestRoute>} />
             <Route path="/sign-up" element={<GuestRoute><SignUp onNavigate={nav} /></GuestRoute>} />
             <Route path="/upload" element={<AuthRoute><UploadPage onNavigate={nav} /></AuthRoute>} />
-            <Route path="/voice-screen" element={<AuthRoute><ProtectedRoute><VoiceScreenPage onNavigate={nav} /></ProtectedRoute></AuthRoute>} />
-            <Route path="/interview" element={<AuthRoute><ProtectedRoute><InterviewPage onNavigate={nav} /></ProtectedRoute></AuthRoute>} />
-            <Route path="/report" element={<AuthRoute><ReportPage /></AuthRoute>} />
+            <Route path="/voice-screen" element={<AuthRoute><ScreeningGate><VoiceScreenPage onNavigate={nav} /></ScreeningGate></AuthRoute>} />
+            <Route path="/interview" element={<AuthRoute><InterviewGate><InterviewPage onNavigate={nav} /></InterviewGate></AuthRoute>} />
+            <Route path="/report" element={<AuthRoute><ReportGate><ReportPage /></ReportGate></AuthRoute>} />
             <Route path="/recruiter" element={<AuthRoute><RecruiterDashboard onNavigate={nav} /></AuthRoute>} />
           </Routes>
         </div>
       </div>
-    </UploadContext.Provider>
+    </UploadContext.Provider >
   );
 }
 

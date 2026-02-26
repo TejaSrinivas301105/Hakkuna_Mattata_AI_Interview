@@ -248,6 +248,8 @@ def generate_next_question(
         ),
     })
 
+
+
     groq_client = _get_groq_client()
     response = groq_client.chat.completions.create(
         messages=messages,
@@ -255,6 +257,7 @@ def generate_next_question(
         max_tokens=100,
         temperature=0.7,
     )
+
 
     next_question = response.choices[0].message.content.strip()
 

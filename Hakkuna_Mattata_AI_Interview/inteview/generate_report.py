@@ -39,29 +39,50 @@ def generate_report(
     Returns:
         Report dict with candidate_summary, skill_assessment, interview_analysis, etc.
     """
+    # Safety: ensure resume is a dict
+    if isinstance(resume, str):
+        try:
+            resume = json.loads(resume)
+        except (json.JSONDecodeError, TypeError):
+            resume = {}
+
     # Handle both resume formats
-    personal_info = resume.get("personalInfo", {})
+    personal_info = resume.get("personalInfo", {}) if isinstance(resume.get("personalInfo"), dict) else {}
     name = resume.get("name", personal_info.get("name", "Candidate"))
     target_role = resume.get("targetRole", resume.get("target_role", "Software Developer"))
     experience = resume.get("experience", [])
     education = resume.get("education", [])
 
-    # Build education string safely
+    # Build education string safely — items can be strings or dicts
     edu_str = "Not specified"
     if education and len(education) > 0:
-        edu_str = f"{education[0].get('degree', 'N/A')} from {education[0].get('institution', 'N/A')}"
+        first_edu = education[0]
+        if isinstance(first_edu, dict):
+            edu_str = f"{first_edu.get('degree', 'N/A')} from {first_edu.get('institution', 'N/A')}"
+        elif isinstance(first_edu, str):
+            edu_str = first_edu
+
+    # Count experience safely — items can be strings or dicts
+    exp_count = len(experience) if isinstance(experience, list) else 0
 
     # Build screening section
     screening_section = "Not conducted"
     if screening_data:
         screening_questions = screening_data.get("questions", [])
         screening_responses = screening_data.get("responses", [])
+        # Ensure responses are serializable (items may be strings or dicts)
+        safe_responses = []
+        for r in screening_responses:
+            if isinstance(r, dict):
+                safe_responses.append(r)
+            else:
+                safe_responses.append({"text": str(r)})
         screening_section = f"""
 Total Questions: {len(screening_questions)}
 Total Responses: {len(screening_responses)}
 
 Screening Responses:
-{json.dumps(screening_responses, indent=2)}
+{json.dumps(safe_responses, indent=2)}
 """
 
     # Build deep interview section
@@ -69,12 +90,19 @@ Screening Responses:
     if deep_interview:
         deep_questions = deep_interview.get("questions", [])
         deep_responses = deep_interview.get("responses", [])
+        # Ensure responses are serializable
+        safe_deep_responses = []
+        for r in deep_responses:
+            if isinstance(r, dict):
+                safe_deep_responses.append(r)
+            else:
+                safe_deep_responses.append({"text": str(r)})
         deep_section = f"""
 Total Questions: {len(deep_questions)}
 Total Responses: {len(deep_responses)}
 
 Deep Interview Responses:
-{json.dumps(deep_responses, indent=2)}
+{json.dumps(safe_deep_responses, indent=2)}
 """
 
     prompt = f"""
@@ -83,7 +111,7 @@ You are a senior technical hiring manager preparing a final evaluation report.
 # CANDIDATE INFORMATION
 Name: {name}
 Role Applied: {target_role}
-Experience: {len(experience)} positions
+Experience: {exp_count} positions
 Education: {edu_str}
 
 # INITIAL CONFIDENCE SCORES (Resume Analysis)

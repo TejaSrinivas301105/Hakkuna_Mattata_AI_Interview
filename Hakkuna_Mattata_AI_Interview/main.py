@@ -942,70 +942,93 @@ async def api_interview_respond(deep_interview_id: str, file: UploadFile = File(
         # Update conversation history
         conversation_history.append({"role": "user", "content": response_text})
 
-        # 4. Generate follow-up or decide next action
-        # Get role and skill info for the follow-up generator
+        # Get candidate name for closing message
         personal_info = resume_data.get("personalInfo", {})
         name = resume_data.get("name", personal_info.get("name", "Candidate"))
-        role = deep_doc.get("target_role", "")
-        strong_skills = ", ".join([s for s, sc in conf_scores.items() if sc >= 0.7])
-        weak_skills = ", ".join([s for s, sc in conf_scores.items() if sc < 0.4])
 
-        # Build recent conversation history text
-        recent_history = "\n".join([
-            f"{'Q' if m['role'] == 'assistant' else 'A'}: {m['content']}"
-            for m in conversation_history[-6:]
-        ])
+        # 4. Determine if we should even ask a follow-up
+        # Count how many MAIN questions (non-follow-up) have been responded to
+        responses_list = deep_doc.get("responses", [])
+        main_questions_answered = len(responses_list) + 1  # +1 for current response
 
-        followup = generate_followup(
-            question=current_question_text,
-            answer=response_text,
-            skill=current_skill,
-            conversation_history=recent_history,
-            confidence_score=conf_scores.get(current_skill, 0.5),
-            question_type=current_type,
-            role=role,
-            strong_skills=strong_skills,
-            weak_skills=weak_skills,
-        )
+        # Check if last question already had a follow-up
+        already_had_followup = False
+        if len(current_questions) >= 2:
+            prev_q = current_questions[-1] if len(current_questions) > 0 else {}
+            already_had_followup = prev_q.get("type") == "FOLLOWUP"
+            if already_had_followup:
+                # This response is to a follow-up, count the parent as the main question
+                main_questions_answered = sum(1 for q in current_questions if q.get("type") != "FOLLOWUP")
 
-        # Determine what happens next
-        should_end = False
-        is_followup = False
-        next_question_text = ""
-        next_skill = ""
-        next_type = ""
-
-        if "END_INTERVIEW" in followup or "end_interview" in followup.lower():
-            # Candidate wants to end
+        # HARD LIMIT: After 5 main questions answered, end the interview
+        if main_questions_answered >= len(plan_questions) or main_questions_answered >= 5:
             should_end = True
             next_question_text = generate_interview_closing(name)
             next_skill = "Closing"
             next_type = "CLOSING"
+            is_followup = False
+        else:
+            # Get role and skill info for the follow-up generator
+            role = deep_doc.get("target_role", "")
+            strong_skills = ", ".join([s for s, sc in conf_scores.items() if sc >= 0.7])
+            weak_skills = ", ".join([s for s, sc in conf_scores.items() if sc < 0.4])
 
-        elif followup.strip() == "NEXT" or "next question" in followup.lower():
-            # Move to next planned question
-            # Find which planned question we should be on
-            answered_plan_count = sum(1 for q in current_questions if q.get("type") != "FOLLOWUP")
-            next_plan_idx = answered_plan_count
+            # Build recent conversation history text
+            recent_history = "\n".join([
+                f"{'Q' if m['role'] == 'assistant' else 'A'}: {m['content']}"
+                for m in conversation_history[-6:]
+            ])
 
-            if next_plan_idx < len(plan_questions):
-                next_q = plan_questions[next_plan_idx]
-                next_question_text = next_q["question"]
-                next_skill = next_q.get("skill", "General")
-                next_type = next_q.get("type", "DEPTH")
-            else:
-                # All planned questions done
+            followup = generate_followup(
+                question=current_question_text,
+                answer=response_text,
+                skill=current_skill,
+                conversation_history=recent_history,
+                confidence_score=conf_scores.get(current_skill, 0.5),
+                question_type=current_type,
+                role=role,
+                strong_skills=strong_skills,
+                weak_skills=weak_skills,
+                current_question_number=main_questions_answered,
+                total_questions=min(len(plan_questions), 5),
+                already_had_followup=already_had_followup,
+            )
+
+            # Determine what happens next
+            should_end = False
+            is_followup = False
+            next_question_text = ""
+            next_skill = ""
+            next_type = ""
+
+            if "END_INTERVIEW" in followup or "end_interview" in followup.lower():
                 should_end = True
                 next_question_text = generate_interview_closing(name)
                 next_skill = "Closing"
                 next_type = "CLOSING"
 
-        else:
-            # Follow-up question
-            is_followup = True
-            next_question_text = followup
-            next_skill = current_skill
-            next_type = "FOLLOWUP"
+            elif followup.strip() == "NEXT":
+                # Move to next planned question
+                answered_main = sum(1 for q in current_questions if q.get("type") != "FOLLOWUP")
+                next_plan_idx = answered_main
+
+                if next_plan_idx < len(plan_questions) and next_plan_idx < 5:
+                    next_q = plan_questions[next_plan_idx]
+                    next_question_text = next_q["question"]
+                    next_skill = next_q.get("skill", "General")
+                    next_type = next_q.get("type", "DEPTH")
+                else:
+                    should_end = True
+                    next_question_text = generate_interview_closing(name)
+                    next_skill = "Closing"
+                    next_type = "CLOSING"
+
+            else:
+                # Technical follow-up question
+                is_followup = True
+                next_question_text = followup
+                next_skill = current_skill
+                next_type = "FOLLOWUP"
 
         # 5. Generate TTS for next question
         next_audio_bytes = text_to_speech(next_question_text)
