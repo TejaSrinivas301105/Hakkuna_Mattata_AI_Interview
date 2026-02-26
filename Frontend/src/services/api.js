@@ -3,7 +3,7 @@
  * Handles all HTTP requests to the backend with JWT token management.
  */
 
-const API_BASE = "http://localhost:8000";
+const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
 function getToken() {
   return localStorage.getItem("token");
