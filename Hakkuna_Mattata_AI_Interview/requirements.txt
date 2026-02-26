@@ -10,3 +10,4 @@ PyJWT
 requests
 PyMuPDF
 SpeechRecognition
+elevenlabs
