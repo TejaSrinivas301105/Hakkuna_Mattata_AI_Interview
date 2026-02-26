@@ -186,6 +186,30 @@ export async function getReport(candidateId) {
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//  SESSION HISTORY
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+export async function getCandidateSessions(candidateId) {
+  return request(`/api/candidates/${candidateId}/sessions`);
+}
+
+export async function getMyReports() {
+  return request("/api/my/reports");
+}
+
+export async function getScreeningInterviews(candidateId) {
+  return request(`/api/candidates/${candidateId}/interviews`);
+}
+
+export async function getDeepInterviews(candidateId) {
+  return request(`/api/candidates/${candidateId}/deep-interviews`);
+}
+
+export async function getCandidateReports(candidateId) {
+  return request(`/api/candidates/${candidateId}/reports`);
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 //  AUDIO
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 

@@ -23,9 +23,9 @@ class CandidateResponse(BaseModel):
     email: str
     resume_refined: Dict
     confidence_scores: Optional[Dict] = None
-    interview_id: Optional[str] = None
-    deep_interview_id: Optional[str] = None
-    report_id: Optional[str] = None
+    interview_ids: List[str] = []
+    deep_interview_ids: List[str] = []
+    report_ids: List[str] = []
     created_at: str
 
 
@@ -110,6 +110,19 @@ class InterviewReportResponse(BaseModel):
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 
+def _to_str_list(doc: dict, array_key: str, legacy_key: str) -> List[str]:
+    """Get list of IDs, with backward compat for old single-value fields."""
+    # New format: array of IDs
+    arr = doc.get(array_key, [])
+    if arr:
+        return [str(x) for x in arr]
+    # Legacy format: single ID
+    single = doc.get(legacy_key)
+    if single:
+        return [str(single)]
+    return []
+
+
 def candidate_doc_to_response(doc: dict) -> CandidateResponse:
     """Convert a MongoDB candidate document to a CandidateResponse."""
     return CandidateResponse(
@@ -118,9 +131,9 @@ def candidate_doc_to_response(doc: dict) -> CandidateResponse:
         email=doc.get("email", ""),
         resume_refined=doc.get("resume_refined", {}),
         confidence_scores=doc.get("confidence_scores"),
-        interview_id=str(doc["interview_id"]) if doc.get("interview_id") else None,
-        deep_interview_id=str(doc["deep_interview_id"]) if doc.get("deep_interview_id") else None,
-        report_id=str(doc["report_id"]) if doc.get("report_id") else None,
+        interview_ids=_to_str_list(doc, "interview_ids", "interview_id"),
+        deep_interview_ids=_to_str_list(doc, "deep_interview_ids", "deep_interview_id"),
+        report_ids=_to_str_list(doc, "report_ids", "report_id"),
         created_at=str(doc.get("created_at", datetime.now(timezone.utc).isoformat())),
     )
 

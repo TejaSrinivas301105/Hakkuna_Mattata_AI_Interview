@@ -67,12 +67,12 @@ export default function Navbar() {
               );
             })}
 
-            {/* Recruiter dashboard is always clickable for authenticated users */}
+            {/* History is always clickable for authenticated users */}
             <button
-              className={`nav-tab ${currentPath === "/recruiter" ? "active" : ""}`}
-              onClick={() => navigate("/recruiter")}
+              className={`nav-tab ${currentPath === "/history" ? "active" : ""}`}
+              onClick={() => navigate("/history")}
             >
-              Recruiter
+              📋 History
             </button>
           </>
         )}

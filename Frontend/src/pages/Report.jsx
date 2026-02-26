@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { RadarChart, PolarGrid, PolarAngleAxis, Radar, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Cell } from "recharts";
 import StatusBadge from "../components/ui/StatusBadge";
 import ProgressRing from "../components/ui/ProgressRing";
@@ -12,6 +12,7 @@ export default function ReportPage() {
   const [generating, setGenerating] = useState(false);
   const [report, setReport] = useState(null);
   const [error, setError] = useState("");
+  const generatingRef = useRef(false); // Prevent double-call from React StrictMode
 
   // Fetch or generate report on mount
   useEffect(() => {
@@ -24,7 +25,9 @@ export default function ReportPage() {
         setReport(res.data.report);
         setLoading(false);
       } catch {
-        // No report exists, generate one
+        // No report exists, generate one — but only once
+        if (generatingRef.current) return;
+        generatingRef.current = true;
         try {
           setGenerating(true);
           const res = await generateReport(candidateId);
@@ -35,6 +38,7 @@ export default function ReportPage() {
           setError(err.message || "Failed to generate report");
           setLoading(false);
           setGenerating(false);
+          generatingRef.current = false;
         }
       }
     }

@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
 from fastapi import FastAPI, File, UploadFile, HTTPException, Depends
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, EmailStr
@@ -14,7 +15,7 @@ from bson import ObjectId
 import io
 
 # Auth imports
-from auth import hash_password, verify_password, create_token, get_current_user
+from auth import hash_password, verify_password, create_token, decode_token, get_current_user
 
 # Add subfolders to Python path so we can import from them
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "resume_parser"))
@@ -207,8 +208,11 @@ async def save_upload_to_temp(file: UploadFile) -> str:
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 
-@app.post("/api/parse-resume", summary="Upload PDF → Parse → Save to DB")
-async def parse_resume(file: UploadFile = File(...)):
+@app.post("/api/parse-resume", summary="Upload PDF and extract resume fields")
+async def parse_resume(
+    file: UploadFile = File(...),
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(HTTPBearer(auto_error=False)),
+):
     """
     Stage 1: Extract data from PDF using rule-based parser.
     Stage 2: Refine with Groq AI.
@@ -230,11 +234,18 @@ async def parse_resume(file: UploadFile = File(...)):
             "email": refined.get("email", ""),
             "resume_refined": refined,
             "confidence_scores": None,
-            "interview_id": None,
-            "deep_interview_id": None,
-            "report_id": None,
+            "interview_ids": [],
+            "deep_interview_ids": [],
+            "report_ids": [],
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
+        # Link candidate to logged-in user if authenticated
+        if credentials:
+            try:
+                payload = decode_token(credentials.credentials)
+                candidate_doc["user_id"] = payload["sub"]
+            except Exception:
+                pass
         result = await Database.candidates().insert_one(candidate_doc)
         candidate_doc["_id"] = result.inserted_id
 
@@ -291,6 +302,8 @@ async def confidence_scores(body: ConfidenceScoreRequest):
     except HTTPException:
         raise
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         raise HTTPException(
             status_code=500,
             detail=f"Failed to calculate confidence scores: {str(e)}",
@@ -300,7 +313,10 @@ async def confidence_scores(body: ConfidenceScoreRequest):
 # ─── API 3: Full Pipeline ───────────────────────────────────────────────────────
 
 @app.post("/api/full-pipeline", summary="Upload PDF → Parse → Scores → Save (all in one)")
-async def full_pipeline(file: UploadFile = File(...)):
+async def full_pipeline(
+    file: UploadFile = File(...),
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(HTTPBearer(auto_error=False)),
+):
     """
     Complete pipeline:
       1. Extract data from PDF
@@ -327,11 +343,18 @@ async def full_pipeline(file: UploadFile = File(...)):
             "email": refined.get("email", ""),
             "resume_refined": refined,
             "confidence_scores": scores,
-            "interview_id": None,
-            "deep_interview_id": None,
-            "report_id": None,
+            "interview_ids": [],
+            "deep_interview_ids": [],
+            "report_ids": [],
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
+        # Link candidate to logged-in user if authenticated
+        if credentials:
+            try:
+                payload = decode_token(credentials.credentials)
+                candidate_doc["user_id"] = payload["sub"]
+            except Exception:
+                pass
         result = await Database.candidates().insert_one(candidate_doc)
         candidate_doc["_id"] = result.inserted_id
 
@@ -421,10 +444,10 @@ async def start_screening(body: InterviewCreate):
         result = await Database.interviews().insert_one(interview_doc)
         interview_id = result.inserted_id
 
-        # Link interview to candidate
+        # Link interview to candidate (append to array)
         await Database.candidates().update_one(
             {"_id": ObjectId(body.candidate_id)},
-            {"$set": {"interview_id": interview_id}},
+            {"$push": {"interview_ids": interview_id}},
         )
 
         return {
@@ -723,16 +746,20 @@ async def api_generate_plan(body: GeneratePlanRequest):
                 detail="No confidence scores found. Run confidence scoring first."
             )
 
-        # Get screening summary if available
+        # Get screening summary from latest screening interview
         screening_summary = ""
         screening_interview_id = None
-        if candidate.get("interview_id"):
+        interview_ids = candidate.get("interview_ids", [])
+        # Backward compat: check legacy single field
+        if not interview_ids and candidate.get("interview_id"):
+            interview_ids = [candidate["interview_id"]]
+        if interview_ids:
             screening_doc = await Database.interviews().find_one(
-                {"_id": candidate["interview_id"]}
+                {"_id": interview_ids[-1]}  # latest screening
             )
             if screening_doc:
                 screening_summary = build_screening_summary(screening_doc)
-                screening_interview_id = candidate["interview_id"]
+                screening_interview_id = interview_ids[-1]
 
         # Generate the interview plan
         plan = build_interview_plan(resume_data, conf_scores, screening_summary)
@@ -758,10 +785,10 @@ async def api_generate_plan(body: GeneratePlanRequest):
         result = await Database.deep_interviews().insert_one(deep_doc)
         deep_doc["_id"] = result.inserted_id
 
-        # Link to candidate
+        # Link to candidate (append to array)
         await Database.candidates().update_one(
             {"_id": ObjectId(body.candidate_id)},
-            {"$set": {"deep_interview_id": result.inserted_id}},
+            {"$push": {"deep_interview_ids": result.inserted_id}},
         )
 
         return {
@@ -1141,36 +1168,58 @@ async def api_generate_report(body: GenerateReportRequest):
         if not candidate:
             raise HTTPException(status_code=404, detail="Candidate not found")
 
+        # Prevent duplicate report generation (e.g. double-click)
+        recent_report = await Database.interview_reports().find_one(
+            {"candidate_id": ObjectId(body.candidate_id)},
+            sort=[("created_at", -1)],
+        )
+        if recent_report and recent_report.get("created_at"):
+            from datetime import timedelta
+            created = recent_report["created_at"]
+            if isinstance(created, str):
+                created = datetime.fromisoformat(created)
+            if (datetime.now(timezone.utc) - created) < timedelta(seconds=60):
+                return {
+                    "status": "success",
+                    "data": report_doc_to_response(recent_report).model_dump(),
+                }
+
         resume_data = candidate["resume_refined"]
         conf_scores = candidate.get("confidence_scores", {})
 
-        # Fetch screening interview
+        # Fetch latest screening interview
         screening_data = None
         screening_interview_id = None
-        if candidate.get("interview_id"):
+        interview_ids = candidate.get("interview_ids", [])
+        if not interview_ids and candidate.get("interview_id"):
+            interview_ids = [candidate["interview_id"]]
+        if interview_ids:
             screening_doc = await Database.interviews().find_one(
-                {"_id": candidate["interview_id"]}
+                {"_id": interview_ids[-1]}
             )
             if screening_doc:
                 screening_data = {
                     "questions": screening_doc.get("questions", []),
                     "responses": screening_doc.get("responses", []),
                 }
-                screening_interview_id = candidate["interview_id"]
+                screening_interview_id = interview_ids[-1]
 
-        # Fetch deep interview
+        # Fetch latest deep interview
         deep_interview_data = None
         deep_interview_id = None
-        if candidate.get("deep_interview_id"):
+        deep_ids = candidate.get("deep_interview_ids", [])
+        if not deep_ids and candidate.get("deep_interview_id"):
+            deep_ids = [candidate["deep_interview_id"]]
+        if deep_ids:
             deep_doc = await Database.deep_interviews().find_one(
-                {"_id": candidate["deep_interview_id"]}
+                {"_id": deep_ids[-1]}
             )
             if deep_doc:
                 deep_interview_data = {
                     "questions": deep_doc.get("questions", []),
                     "responses": deep_doc.get("responses", []),
                 }
-                deep_interview_id = candidate["deep_interview_id"]
+                deep_interview_id = deep_ids[-1]
 
         # Generate report
         report = generate_report(
@@ -1190,10 +1239,10 @@ async def api_generate_report(body: GenerateReportRequest):
         }
         result = await Database.interview_reports().insert_one(report_doc)
 
-        # Link report to candidate
+        # Link report to candidate (append to array)
         await Database.candidates().update_one(
             {"_id": ObjectId(body.candidate_id)},
-            {"$set": {"report_id": result.inserted_id}},
+            {"$push": {"report_ids": result.inserted_id}},
         )
 
         # Also link to deep interview if exists
@@ -1241,6 +1290,160 @@ async def api_get_deep_interview(deep_interview_id: str):
     if not doc:
         raise HTTPException(status_code=404, detail="Deep interview not found")
     return {"status": "success", "data": deep_interview_doc_to_response(doc).model_dump()}
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#  MY DATA APIs (authenticated user's own data)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+
+@app.get("/api/my/reports", summary="Get all reports for the logged-in user")
+async def api_my_reports(user: dict = Depends(get_current_user)):
+    """
+    Find all candidates belonging to the current user (by user_id),
+    then fetch all their reports. Returns newest first.
+    """
+    user_id = user["sub"]
+
+    # Find all candidates that belong to this user
+    candidates = []
+    async for c in Database.candidates().find({"user_id": user_id}):
+        candidates.append(c)
+
+    if not candidates:
+        return {"status": "success", "data": {"reports": [], "total": 0}}
+
+    # Collect all report IDs from all candidates (deduplicated)
+    all_reports = []
+    seen_ids = set()
+    for candidate in candidates:
+        # New format: report_ids array
+        report_ids = candidate.get("report_ids", [])
+        # Legacy: single report_id
+        if not report_ids and candidate.get("report_id"):
+            report_ids = [candidate["report_id"]]
+
+        for rid in report_ids:
+            rid_str = str(rid)
+            if rid_str in seen_ids:
+                continue
+            seen_ids.add(rid_str)
+            doc = await Database.interview_reports().find_one({"_id": rid})
+            if doc:
+                report_data = report_doc_to_response(doc).model_dump()
+                report_data["candidate_name"] = candidate.get("name", "Unknown")
+                all_reports.append(report_data)
+
+    # Sort newest first
+    all_reports.sort(key=lambda r: r.get("created_at", ""), reverse=True)
+
+    return {
+        "status": "success",
+        "data": {
+            "reports": all_reports,
+            "total": len(all_reports),
+        },
+    }
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#  SESSION HISTORY APIs
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+
+@app.get("/api/candidates/{candidate_id}/sessions", summary="Get all interview sessions for a candidate")
+async def api_get_candidate_sessions(candidate_id: str):
+    """Get full session history: all screening interviews, deep interviews, and reports."""
+    candidate = await Database.candidates().find_one({"_id": ObjectId(candidate_id)})
+    if not candidate:
+        raise HTTPException(status_code=404, detail="Candidate not found")
+
+    # Get all screening interviews
+    screening_ids = candidate.get("interview_ids", [])
+    # Backward compat
+    if not screening_ids and candidate.get("interview_id"):
+        screening_ids = [candidate["interview_id"]]
+
+    screenings = []
+    for sid in screening_ids:
+        doc = await Database.interviews().find_one({"_id": sid})
+        if doc:
+            screenings.append(interview_doc_to_response(doc).model_dump())
+
+    # Get all deep interviews
+    deep_ids = candidate.get("deep_interview_ids", [])
+    if not deep_ids and candidate.get("deep_interview_id"):
+        deep_ids = [candidate["deep_interview_id"]]
+
+    deep_interviews = []
+    for did in deep_ids:
+        doc = await Database.deep_interviews().find_one({"_id": did})
+        if doc:
+            deep_interviews.append(deep_interview_doc_to_response(doc).model_dump())
+
+    # Get all reports
+    report_ids = candidate.get("report_ids", [])
+    if not report_ids and candidate.get("report_id"):
+        report_ids = [candidate["report_id"]]
+
+    reports = []
+    for rid in report_ids:
+        doc = await Database.interview_reports().find_one({"_id": rid})
+        if doc:
+            reports.append(report_doc_to_response(doc).model_dump())
+
+    return {
+        "status": "success",
+        "data": {
+            "candidate": candidate_doc_to_response(candidate).model_dump(),
+            "screening_interviews": screenings,
+            "deep_interviews": deep_interviews,
+            "reports": reports,
+            "total_sessions": len(screenings) + len(deep_interviews),
+        },
+    }
+
+
+@app.get("/api/candidates/{candidate_id}/interviews", summary="List all screening interviews")
+async def api_list_screening_interviews(candidate_id: str):
+    """List all screening interviews for a candidate, newest first."""
+    cursor = Database.interviews().find(
+        {"candidate_id": ObjectId(candidate_id)}
+    ).sort("created_at", -1)
+
+    interviews = []
+    async for doc in cursor:
+        interviews.append(interview_doc_to_response(doc).model_dump())
+
+    return {"status": "success", "data": interviews}
+
+
+@app.get("/api/candidates/{candidate_id}/deep-interviews", summary="List all deep interviews")
+async def api_list_deep_interviews(candidate_id: str):
+    """List all deep interviews for a candidate, newest first."""
+    cursor = Database.deep_interviews().find(
+        {"candidate_id": ObjectId(candidate_id)}
+    ).sort("created_at", -1)
+
+    interviews = []
+    async for doc in cursor:
+        interviews.append(deep_interview_doc_to_response(doc).model_dump())
+
+    return {"status": "success", "data": interviews}
+
+
+@app.get("/api/candidates/{candidate_id}/reports", summary="List all reports")
+async def api_list_reports(candidate_id: str):
+    """List all reports for a candidate, newest first."""
+    cursor = Database.interview_reports().find(
+        {"candidate_id": ObjectId(candidate_id)}
+    ).sort("created_at", -1)
+
+    reports = []
+    async for doc in cursor:
+        reports.append(report_doc_to_response(doc).model_dump())
+
+    return {"status": "success", "data": reports}
 
 
 # ─── Run ─────────────────────────────────────────────────────────────────────────

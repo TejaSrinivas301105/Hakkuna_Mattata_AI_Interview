@@ -10,7 +10,7 @@ import UploadPage from "./pages/Upload";
 import VoiceScreenPage from "./pages/VoiceScreen";
 import InterviewPage from "./pages/Interview";
 import ReportPage from "./pages/Report";
-import RecruiterDashboard from "./pages/Recruiter";
+import HistoryPage from "./pages/History";
 import "./design/styles.css";
 
 function AuthRoute({ children }) {
@@ -82,7 +82,7 @@ function AppContent() {
             <Route path="/voice-screen" element={<AuthRoute><ScreeningGate><VoiceScreenPage onNavigate={nav} /></ScreeningGate></AuthRoute>} />
             <Route path="/interview" element={<AuthRoute><InterviewGate><InterviewPage onNavigate={nav} /></InterviewGate></AuthRoute>} />
             <Route path="/report" element={<AuthRoute><ReportGate><ReportPage /></ReportGate></AuthRoute>} />
-            <Route path="/recruiter" element={<AuthRoute><RecruiterDashboard onNavigate={nav} /></AuthRoute>} />
+            <Route path="/history" element={<AuthRoute><HistoryPage /></AuthRoute>} />
           </Routes>
         </div>
       </div>
