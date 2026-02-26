@@ -146,8 +146,9 @@ export default function VoiceScreenPage({ onNavigate }) {
     }
   };
 
-  const endCall = () => {
+  const endCall = async () => {
     setStatus("completed");
+    // interviewId is already set in context via setInterviewId
     onNavigate("Interview");
   };
 

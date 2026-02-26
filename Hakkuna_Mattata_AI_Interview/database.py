@@ -45,8 +45,18 @@ class Database:
 
     @classmethod
     def interviews(cls):
-        """Access the interviews collection."""
+        """Access the screening interviews collection."""
         return cls.db["interviews"]
+
+    @classmethod
+    def deep_interviews(cls):
+        """Access the deep technical interviews collection."""
+        return cls.db["deep_interviews"]
+
+    @classmethod
+    def interview_reports(cls):
+        """Access the interview reports collection."""
+        return cls.db["interview_reports"]
 
     # ─── GridFS helpers ─────────────────────────────────────────────────
 

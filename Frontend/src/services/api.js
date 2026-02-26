@@ -27,6 +27,12 @@ async function request(endpoint, options = {}) {
     headers,
   });
 
+  // Handle audio/binary responses
+  if (options.responseType === "blob") {
+    if (!res.ok) throw new Error("Request failed");
+    return res.blob();
+  }
+
   const data = await res.json();
 
   if (!res.ok) {
@@ -121,6 +127,62 @@ export async function sendScreeningResponse(interviewId, audioBlob) {
 
 export async function getInterview(interviewId) {
   return request(`/api/interviews/${interviewId}`);
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//  DEEP INTERVIEW
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+export async function generateInterviewPlan(candidateId) {
+  return request("/api/interview/generate-plan", {
+    method: "POST",
+    body: JSON.stringify({ candidate_id: candidateId }),
+  });
+}
+
+export async function startDeepInterview(candidateId, deepInterviewId) {
+  return request("/api/interview/start", {
+    method: "POST",
+    body: JSON.stringify({
+      candidate_id: candidateId,
+      deep_interview_id: deepInterviewId,
+    }),
+  });
+}
+
+export async function sendInterviewResponse(deepInterviewId, audioBlob) {
+  const formData = new FormData();
+  formData.append("file", audioBlob, `deep_response_${Date.now()}.wav`);
+  return request(`/api/interview/respond?deep_interview_id=${deepInterviewId}`, {
+    method: "POST",
+    body: formData,
+  });
+}
+
+export async function endInterview(deepInterviewId) {
+  return request("/api/interview/end", {
+    method: "POST",
+    body: JSON.stringify({ deep_interview_id: deepInterviewId }),
+  });
+}
+
+export async function getDeepInterview(deepInterviewId) {
+  return request(`/api/interview/deep/${deepInterviewId}`);
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//  REPORT
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+export async function generateReport(candidateId) {
+  return request("/api/interview/generate-report", {
+    method: "POST",
+    body: JSON.stringify({ candidate_id: candidateId }),
+  });
+}
+
+export async function getReport(candidateId) {
+  return request(`/api/interview/report/${candidateId}`);
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

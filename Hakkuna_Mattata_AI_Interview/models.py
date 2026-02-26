@@ -24,11 +24,13 @@ class CandidateResponse(BaseModel):
     resume_refined: Dict
     confidence_scores: Optional[Dict] = None
     interview_id: Optional[str] = None
+    deep_interview_id: Optional[str] = None
+    report_id: Optional[str] = None
     created_at: str
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-#  Interview Models
+#  Interview Models (Screening)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 
@@ -62,6 +64,48 @@ class InterviewDetail(BaseModel):
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#  Deep Interview Models
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+
+class DeepInterviewCreate(BaseModel):
+    """Data for starting a deep technical interview."""
+    candidate_id: str
+
+
+class DeepInterviewDetail(BaseModel):
+    """Full deep interview data returned from the API."""
+    id: str
+    candidate_id: str
+    screening_interview_id: Optional[str] = None
+    status: str  # "pending" | "planning" | "in_progress" | "completed"
+    target_role: str
+    interview_plan: Optional[Dict] = None
+    questions: List[Dict] = []
+    responses: List[Dict] = []
+    conversation_history: List[Dict] = []
+    question_count: int = 0
+    audio_file_ids: List[str] = []
+    report_id: Optional[str] = None
+    created_at: str
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#  Interview Report Models
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+
+class InterviewReportResponse(BaseModel):
+    """Full report data returned from the API."""
+    id: str
+    candidate_id: str
+    deep_interview_id: Optional[str] = None
+    screening_interview_id: Optional[str] = None
+    report: Dict
+    created_at: str
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 #  Helper: Convert MongoDB document → response model
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -75,6 +119,8 @@ def candidate_doc_to_response(doc: dict) -> CandidateResponse:
         resume_refined=doc.get("resume_refined", {}),
         confidence_scores=doc.get("confidence_scores"),
         interview_id=str(doc["interview_id"]) if doc.get("interview_id") else None,
+        deep_interview_id=str(doc["deep_interview_id"]) if doc.get("deep_interview_id") else None,
+        report_id=str(doc["report_id"]) if doc.get("report_id") else None,
         created_at=str(doc.get("created_at", datetime.now(timezone.utc).isoformat())),
     )
 
@@ -88,5 +134,36 @@ def interview_doc_to_response(doc: dict) -> InterviewDetail:
         target_role=doc.get("target_role", ""),
         questions=doc.get("questions", []),
         responses=doc.get("responses", []),
+        created_at=str(doc.get("created_at", datetime.now(timezone.utc).isoformat())),
+    )
+
+
+def deep_interview_doc_to_response(doc: dict) -> DeepInterviewDetail:
+    """Convert a MongoDB deep interview document to a DeepInterviewDetail."""
+    return DeepInterviewDetail(
+        id=str(doc["_id"]),
+        candidate_id=str(doc.get("candidate_id", "")),
+        screening_interview_id=str(doc["screening_interview_id"]) if doc.get("screening_interview_id") else None,
+        status=doc.get("status", "pending"),
+        target_role=doc.get("target_role", ""),
+        interview_plan=doc.get("interview_plan"),
+        questions=doc.get("questions", []),
+        responses=doc.get("responses", []),
+        conversation_history=doc.get("conversation_history", []),
+        question_count=doc.get("question_count", 0),
+        audio_file_ids=doc.get("audio_file_ids", []),
+        report_id=str(doc["report_id"]) if doc.get("report_id") else None,
+        created_at=str(doc.get("created_at", datetime.now(timezone.utc).isoformat())),
+    )
+
+
+def report_doc_to_response(doc: dict) -> InterviewReportResponse:
+    """Convert a MongoDB report document to an InterviewReportResponse."""
+    return InterviewReportResponse(
+        id=str(doc["_id"]),
+        candidate_id=str(doc.get("candidate_id", "")),
+        deep_interview_id=str(doc["deep_interview_id"]) if doc.get("deep_interview_id") else None,
+        screening_interview_id=str(doc["screening_interview_id"]) if doc.get("screening_interview_id") else None,
+        report=doc.get("report", {}),
         created_at=str(doc.get("created_at", datetime.now(timezone.utc).isoformat())),
     )
